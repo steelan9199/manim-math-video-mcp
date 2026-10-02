@@ -6,14 +6,27 @@ import json
 import os
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.caching import CacheHint
+from mcp.server.mcpserver import MCPServer
 
 from math_animation_mcp.tools import render_tools, template_tools, input_tools, repair_tools, personalization_tools, export_tools
 
-mcp = FastMCP(
+# MCP 2026-07-28: tools/list and server/discover now carry a CacheableResult, so
+# advertise a freshness hint. The tool catalog only changes when templates are
+# edited on disk, so a short TTL keeps clients from re-fetching on every
+# reconnect while still picking up template changes reasonably fast.
+CACHE_HINTS = {
+    "tools/list": CacheHint(ttl_ms=60_000, scope="public"),
+    "server/discover": CacheHint(ttl_ms=300_000, scope="public"),
+}
+
+mcp = MCPServer(
     "math-animation",
     instructions="Generate 3Blue1Brown-style math teaching animations with Manim. "
                  "Supports text, LaTeX, PDF, images as input. Chinese math exams supported.",
+    # v2 returns an empty version string unless one is set explicitly.
+    version="2.0.0",
+    cache_hints=CACHE_HINTS,
 )
 
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "./animation_output")

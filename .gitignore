@@ -65,3 +65,5 @@ htmlcov/
 # Local backup copies
 *.bak
 *.bak_*
+
+_backup_mcp*/

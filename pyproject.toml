@@ -1,14 +1,17 @@
 [project]
 name = "math-animation-mcp"
-version = "0.1.0"
+version = "2.0.0"
 description = "MCP Server for generating 3Blue1Brown-style math teaching animations with Manim"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
     "manim>=0.18.0",
-    "mcp[cli]>=1.0.0",
-    "pydantic>=2.0.0",
+    # MCP Python SDK v2 — speaks the 2026-07-28 spec revision (stateless
+    # protocol core, server/discover, subscriptions) while still answering
+    # 2025-era clients from the same stdio endpoint.
+    "mcp[cli]>=2.0.0,<3",
+    "pydantic>=2.12.0",
     "pyyaml>=6.0",
     "gradio>=4.0.0",
     "pix2text>=1.1",
