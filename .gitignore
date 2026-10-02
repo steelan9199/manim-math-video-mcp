@@ -48,3 +48,20 @@ logs/
 
 # User preferences (machine-specific)
 manim_prefs.yaml
+
+# Temporary render workspace and local checks
+_render_tmp/
+_rt_check.txt
+
+# Python test and tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+htmlcov/
+.coverage
+.coverage.*
+
+# Local backup copies
+*.bak
+*.bak_*

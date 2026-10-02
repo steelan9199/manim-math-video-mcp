@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from math_animation_mcp.utils.sandbox import render_manim_code, RenderResult
-from math_animation_mcp.utils.chinese_support import inject_chinese_support
+from math_animation_mcp.utils.chinese_support import (
+    inject_chinese_support,
+    inject_default_font,
+)
 from math_animation_mcp.styles.presets import get_preset
 
 
@@ -53,6 +56,7 @@ def render_animation(
         Dict with success, file_path, error_msg, etc.
     """
     code = inject_chinese_support(code)
+    code = inject_default_font(code)
     code = _apply_style_to_code(code, style)
 
     result = render_manim_code(
@@ -71,15 +75,25 @@ def render_animation(
     }
 
 
-def preview_scene(code: str, style: str | None = None, output_dir: str = "./animation_output") -> dict:
-    """Quick 480p preview render."""
+def preview_scene(
+    code: str,
+    style: str | None = None,
+    output_dir: str = "./animation_output",
+    timeout: int = 120,
+) -> dict:
+    """Quick 480p preview render.
+
+    timeout defaults to 120s. It used to be hardcoded to 60s, which was too
+    tight: a 35s scene needs ~30s at 480p, so anything longer than roughly a
+    minute got killed mid-render.
+    """
     return render_animation(
         code,
         quality="low",
         fmt="mp4",
         style=style,
         output_dir=output_dir,
-        timeout=60,
+        timeout=timeout,
     )
 
 

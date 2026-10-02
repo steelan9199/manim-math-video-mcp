@@ -6,6 +6,7 @@ import os
 import subprocess
 import tempfile
 import shutil
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -37,6 +38,31 @@ def _find_output_video(media_dir: Path, scene_name: str) -> str | None:
     return None
 
 
+def _resolve_python_bin() -> str:
+    """Pick the interpreter used to run Manim.
+
+    Resolution order:
+      1. MAMCP_PYTHON env var (explicit override, recommended when Manim lives
+         in a shared environment outside this repo).
+      2. A virtualenv inside the repo: .venv/bin/python (POSIX) or
+         .venv/Scripts/python.exe (Windows).
+      3. Bare "python" resolved from PATH.
+    """
+    override = os.environ.get("MAMCP_PYTHON")
+    if override and os.path.exists(override):
+        return override
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))))
+    for candidate in (
+        os.path.join(repo_root, ".venv", "bin", "python"),
+        os.path.join(repo_root, ".venv", "Scripts", "python.exe"),
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    return "python"
+
+
 def render_manim_code(
     code: str,
     *,
@@ -63,22 +89,33 @@ def render_manim_code(
         return RenderResult(success=False, error_msg="No Scene subclass found in code")
 
     os.makedirs(output_dir, exist_ok=True)
+    output_dir = os.path.abspath(output_dir)
 
-    tmpdir = tempfile.mkdtemp(prefix="manim_render_")
+    # Work root: prefer an explicit project-local directory (MAMCP_TMP_DIR).
+    # The OS temp dir is path-virtualised by some host sandboxes, which makes the
+    # spawned Manim process wedge before it produces any output.
+    work_root = os.environ.get("MAMCP_TMP_DIR") or None
+    if work_root:
+        try:
+            os.makedirs(work_root, exist_ok=True)
+        except Exception:
+            work_root = None
+    if work_root:
+        tmpdir = tempfile.mkdtemp(prefix="manim_render_", dir=work_root)
+    else:
+        tmpdir = tempfile.mkdtemp(prefix="manim_render_")
+
     script_path = os.path.join(tmpdir, "scene.py")
     media_dir = os.path.join(tmpdir, "media")
+    child_log_path = os.path.join(output_dir, f"_render_{scene_name}.log")
+    spawn_log_path = os.path.join(output_dir, "_render_spawn.log")
 
     try:
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(code)
 
         if python_bin is None:
-            venv_python = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.dirname(os.path.abspath(__file__))))), ".venv", "bin", "python")
-            if os.path.exists(venv_python):
-                python_bin = venv_python
-            else:
-                python_bin = "python"
+            python_bin = _resolve_python_bin()
 
         cmd = [
             python_bin, "-m", "manim", "render",
@@ -89,20 +126,83 @@ def render_manim_code(
             cmd.append(fflag)
         cmd.extend([script_path, scene_name])
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=tmpdir,
-        )
+        # --- diagnostics -------------------------------------------------
+        t_start = time.time()
+        try:
+            with open(spawn_log_path, "a", encoding="utf-8") as sf:
+                sf.write(
+                    "%s | SPAWN | cwd=%s | python=%s (exists=%s) | stdin=DEVNULL\n"
+                    % (time.strftime("%H:%M:%S"), tmpdir, python_bin,
+                       os.path.exists(python_bin))
+                )
+                sf.flush()
+        except Exception:
+            pass
 
-        if result.returncode != 0:
+        # Child stdout/stderr go to a log file (not a pipe). A pipe held open by
+        # ffmpeg/latex grandchildren is a classic source of deadlocks, and this
+        # also lets us watch progress while the render runs.
+        returncode = None
+        timed_out = False
+        with open(child_log_path, "w", encoding="utf-8", errors="replace") as cf:
+            cf.write("CMD: %s\nCWD: %s\n\n" % (cmd, tmpdir))
+            cf.flush()
+            proc = subprocess.Popen(
+                cmd,
+                stdout=cf,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                cwd=tmpdir,
+            )
+            try:
+                returncode = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                alive = proc.poll() is None
+                try:
+                    cf.write("\n[watchdog] timeout after %.1fs, child alive=%s\n"
+                             % (time.time() - t_start, alive))
+                    cf.flush()
+                except Exception:
+                    pass
+                proc.kill()
+                try:
+                    proc.wait(timeout=10)
+                except Exception:
+                    pass
+
+        try:
+            with open(spawn_log_path, "a", encoding="utf-8") as sf:
+                sf.write(
+                    "%s | %s | elapsed=%.1fs | rc=%s\n"
+                    % (time.strftime("%H:%M:%S"),
+                       "TIMEOUT" if timed_out else "DONE",
+                       time.time() - t_start, returncode)
+                )
+                sf.flush()
+        except Exception:
+            pass
+
+        try:
+            with open(child_log_path, "r", encoding="utf-8", errors="replace") as cf:
+                child_out = cf.read()
+        except Exception:
+            child_out = ""
+
+        if timed_out:
             return RenderResult(
                 success=False,
-                error_msg=result.stderr[-2000:] if result.stderr else "Unknown render error",
-                stdout=result.stdout[-1000:],
-                stderr=result.stderr[-2000:],
+                error_msg=f"Render timed out after {timeout}s",
+                stdout=child_out[-1000:],
+                stderr=child_out[-2000:],
+            )
+
+        if returncode != 0:
+            return RenderResult(
+                success=False,
+                error_msg=child_out[-2000:] if child_out else "Unknown render error",
+                stdout=child_out[-1000:],
+                stderr=child_out[-2000:],
             )
 
         video_path = _find_output_video(Path(media_dir), scene_name)
@@ -110,8 +210,8 @@ def render_manim_code(
             return RenderResult(
                 success=False,
                 error_msg="Render succeeded but no output file found",
-                stdout=result.stdout[-1000:],
-                stderr=result.stderr[-1000:],
+                stdout=child_out[-1000:],
+                stderr=child_out[-1000:],
             )
 
         final_name = f"{scene_name}.{fmt}"
@@ -126,8 +226,8 @@ def render_manim_code(
         return RenderResult(
             success=True,
             file_path=os.path.abspath(final_path),
-            stdout=result.stdout[-500:],
-            stderr=result.stderr[-500:],
+            stdout=child_out[-500:],
+            stderr=child_out[-500:],
         )
 
     except subprocess.TimeoutExpired:
