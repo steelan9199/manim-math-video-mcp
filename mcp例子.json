@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "math-animation": {
+      "command": "D:\\software\\uv\\envs\\py314-cpu\\Scripts\\python.exe",
+      "args": ["D:\\github\\math-animation-mcp\\workbuddy_mcp_launch.py"],
+      "env": {
+        "MAMCP_PYTHON": "D:\\software\\uv\\envs\\py314-cpu\\Scripts\\python_direct.exe",
+        "OUTPUT_DIR": "D:\\github\\math-animation-mcp\\animation_output",
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}
