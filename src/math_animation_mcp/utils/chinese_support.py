@@ -75,17 +75,29 @@ def inject_default_font(code: str, font: str | None = None) -> str:
 
 
 def inject_chinese_support(code: str) -> str:
-    """If code uses Chinese characters but has no ctex setup, inject it."""
+    """Make every LaTeX-rendered mobject load ctex, so Chinese works in Tex/Title/MathTex.
+
+    Sets ``config.tex_template`` -- the process-wide default that every ``Tex`` /
+    ``Title`` / ``MathTex`` reads when no explicit ``tex_template=`` is passed
+    (see manim ``mobject/text/tex_mobject.py``). Manim's stock template only
+    loads ``\\usepackage[english]{babel}``, so any CJK codepoint inside a LaTeX
+    string dies with ``latex error converting to dvi`` and zero output.
+
+    Only injected when the scene actually contains CJK and has not already set
+    ``config.tex_template`` itself. This function used to create a throwaway
+    ``_zh_template`` variable that nothing ever consumed, so the ctex support it
+    advertised never actually took effect.
+    """
     has_chinese = any('\u4e00' <= ch <= '\u9fff' for ch in code)
     if not has_chinese:
         return code
-    if "ctex" in code:
+    # Respect a template choice the scene already made.
+    if "config.tex_template" in code:
         return code
 
     injection = (
-        'from manim import TexTemplate\n'
-        '_zh_template = TexTemplate()\n'
-        '_zh_template.add_to_preamble(r"\\\\usepackage[UTF8]{ctex}")\n'
+        'config.tex_template = TexTemplateLibrary.ctex'
+        '  # MAMCP: LaTeX Chinese support (CJK in Tex/Title/MathTex)\n'
     )
 
     lines = code.split('\n')
